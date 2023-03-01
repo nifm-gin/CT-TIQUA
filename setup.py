@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="CT_TIQUA",
-    version="1.2",
+    version="2.0",
     author="Brossard Clement, Lemasson Benjamin",
     author_email="benjamin.lemasson@univ-grenoble-alpes.fr",
     description="computed Tomography traumatic brain Injury QUAntification",
