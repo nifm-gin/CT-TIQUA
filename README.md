@@ -7,7 +7,7 @@ This software takes as input a CT-scan of a head injured patient and returns:
 * 2/ a structural atlas dividing the input brain in 10 zones
 * 3/ a csv file containing the volume in mm3 of all type on lesion in all zone of the brain 
  
-It was developed by Clément Brossard and Benjamin Lemasson (benjamin.lemasson@univ-grenoble-alpes.fr). We are currently writing a scientific article descibing the whole process. If you use our software, please cite our work!
+It was developed by Clément Brossard and Benjamin Lemasson (benjamin.lemasson@univ-grenoble-alpes.fr). We are currently writing a scientific article descibing the whole process. If you use our software, please cite our work! Part of this repository is taken and modified from the repository https://github.com/biomedia-mira/blast-ct , so please consider citing their work too if relevant.
 
 To use this software :
 * 1/ Install docker : https://docs.docker.com/get-docker/
