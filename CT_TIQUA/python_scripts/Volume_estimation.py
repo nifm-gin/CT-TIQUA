@@ -157,7 +157,7 @@ def Single_Volume_Inference(atlas, seg, Labels, outcsv):
     # The problem is in the resampling of the registered raw data at 1mm3 and then should be fixed on that function, not here ...
     if seg_h.shape != atlas_h.shape:
         print("Error")
-        seg_h = nibabel.processing.conform(seg_h,atlas_h.shape, seg_h.header.get("pixdim")[1:4], order = 0)
+        seg_h = nibabel.processing.conform(seg_h,atlas_h.shape, atlas_h.header.get("pixdim")[1:4], order = 0)
         
     seg = seg_h.get_fdata()
     atlas = atlas_h.get_fdata()
