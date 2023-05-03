@@ -45,7 +45,7 @@ def Computation_Volume_Seg_Atlas(Path_atlas, Path_Seg, label_file, Output_file_p
         if seg_h.shape != atlas_h.shape:
             print("Error")
             print(row)
-            seg_h = nibabel.processing.conform(seg_h,atlas_h.shape, seg_h.header.get("pixdim")[1:4], order = 0)
+            seg_h = nibabel.processing.conform(seg_h,atlas_h.shape, atlas_h.header.get("pixdim")[1:4], order = 0)
         else:
             print(row)
         
