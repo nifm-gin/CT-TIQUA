@@ -108,7 +108,7 @@ def inference(infile, outfolder, ensemble, keep_tmp_files):
     
     #SEGMENTATION BLAST
     print('Start of the segmentation...')
-    segfile = outfolder+sep+basename+'_seg.nii.gz'
+    segfile = tmp_fold+sep+basename+'_seg.nii.gz'
     probfile = tmp_fold+sep+basename+'_prob.nii.gz'
     if torch.cuda.is_available() and torch.cuda.device_count()>0:
         device = torch.cuda.current_device()
@@ -170,20 +170,35 @@ def inference(infile, outfolder, ensemble, keep_tmp_files):
     mytx = reg['fwdtransforms']
     im_to_embarque = ants.image_read(tmp_fold+basename+'_Altas_FLIRTRegistered.nii')
     embarqued_im = ants.apply_transforms(img_fixed, im_to_embarque, transformlist=mytx, interpolator='nearestNeighbor')
-    embarqued_im.to_file(outfolder+sep+basename+'_Altas_ANTSRegistered.nii.gz')
+    embarqued_im.to_file(tmp_fold+sep+basename+'_Altas_ANTSRegistered.nii.gz')
     print('End of the elastic registration')
     
 
     #CHECK THAT REGISTERED TEMPLATE AND ATLAS HAVE A QFORMCODE EQUAL TO 1
 
     print('Start of the volume computation...')
-    seg = outfolder+sep+basename+'_seg.nii.gz'
-    atlas = outfolder+sep+basename+'_Altas_ANTSRegistered.nii.gz'
+    seg = tmp_fold+sep+basename+'_seg.nii.gz'
+    atlas = tmp_fold+sep+basename+'_Altas_ANTSRegistered.nii.gz'
     Labels = fold+sep+'data'+sep+'Labels_With_0.csv'
     outcsv = outfolder+sep+basename+'_Volumes.csv'
     Single_Volume_Inference(atlas, seg, Labels, outcsv)
     
     print('End of the volume computation')
+    
+    
+    #RESAMPLE ATLAS AND SEGMENTATION TO MATCH THE RESOLUTION OF INPUT CT IMAGE
+    print('Start of the final resampling...')
+    #Resampling the atlas
+    file_orig_h = nib.load(infile)
+    file_to_process_h = nib.load(tmp_fold+sep+basename+'_Altas_ANTSRegistered.nii.gz')
+    file_output_h = nibabel.processing.resample_from_to(file_to_process_h, file_orig_h, order = 0)
+    nib.save(file_output_h,outfolder+sep+basename+'_Altas.nii.gz')
+    #Resampling the segmentation
+    file_to_process_h = nib.load(segfile)
+    file_output_h = nibabel.processing.resample_from_to(file_to_process_h, file_orig_h, order = 0)
+    nib.save(file_output_h,outfolder+sep+basename+'_Segmentation.nii.gz')
+    
+    print('End of the final resampling')
     
     if not keep_tmp_files:
         print('Removing of the temporary files...')
