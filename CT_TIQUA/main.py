@@ -124,6 +124,7 @@ def inference(infile, outfolder, ensemble, keep_tmp_files):
     # REGISTRATION
     print('Start of the linear registration...')
     Atlas = fold+sep+'data'+sep+'Resliced_Registered_Labels_mod.nii.gz'
+    Atlas_vasc = fold+sep+'data'+sep+'ArterialAtlas.nii.gz'
     Template = fold+sep+'data'+sep+'TEMPLATE_miplab-ncct_sym_brain.nii.gz'
     flt = fsl.FLIRT()
 
@@ -152,6 +153,15 @@ def inference(infile, outfolder, ensemble, keep_tmp_files):
     applyxfm.inputs.interp = 'nearestneighbour'
     applyxfm.run()
             
+    applyxfm = fsl.ApplyXFM()
+    applyxfm.inputs.in_matrix_file = tmp_fold+basename+ '_FLIRTRegisteredTemplate_transform-matrix.mat'
+    applyxfm.inputs.in_file = Atlas_vasc
+    applyxfm.inputs.out_file = tmp_fold+basename+'_AltasVasc_FLIRTRegistered.nii'
+    applyxfm.inputs.reference = tmp_fold+basename+'_SkullStripped_clean.nii.gz'
+    applyxfm.inputs.apply_xfm = True
+    applyxfm.inputs.out_matrix_file = tmp_fold+basename+ '_FLIRTRegisteredAtlasVasc_transform-matrix.mat'
+    applyxfm.inputs.interp = 'nearestneighbour'
+    applyxfm.run()
     
     print('End of the linear registration')
     
@@ -171,10 +181,14 @@ def inference(infile, outfolder, ensemble, keep_tmp_files):
     im_to_embarque = ants.image_read(tmp_fold+basename+'_Altas_FLIRTRegistered.nii')
     embarqued_im = ants.apply_transforms(img_fixed, im_to_embarque, transformlist=mytx, interpolator='nearestNeighbor')
     embarqued_im.to_file(tmp_fold+sep+basename+'_Altas_ANTSRegistered.nii.gz')
+    
+    im_to_embarque = ants.image_read(tmp_fold+basename+'_AltasVasc_FLIRTRegistered.nii')
+    embarqued_im = ants.apply_transforms(img_fixed, im_to_embarque, transformlist=mytx, interpolator='nearestNeighbor')
+    embarqued_im.to_file(tmp_fold+sep+basename+'_AltasVasc_ANTSRegistered.nii.gz')
+    
     print('End of the elastic registration')
     
 
-    #CHECK THAT REGISTERED TEMPLATE AND ATLAS HAVE A QFORMCODE EQUAL TO 1
 
     print('Start of the volume computation...')
     seg = tmp_fold+sep+basename+'_seg.nii.gz'
@@ -182,6 +196,13 @@ def inference(infile, outfolder, ensemble, keep_tmp_files):
     Labels = fold+sep+'data'+sep+'Labels_With_0.csv'
     outcsv = outfolder+sep+basename+'_Volumes.csv'
     Single_Volume_Inference(atlas, seg, Labels, outcsv)
+    
+    atlas = tmp_fold+sep+basename+'_AltasVasc_ANTSRegistered.nii.gz'
+    Labels = fold+sep+'data'+sep+'Labels_With_0_vasc.csv'
+    outcsv = outfolder+sep+basename+'_Volumes_vasc.csv'
+    Single_Volume_Inference(atlas, seg, Labels, outcsv)
+    
+    
     
     print('End of the volume computation')
     
@@ -193,6 +214,10 @@ def inference(infile, outfolder, ensemble, keep_tmp_files):
     file_to_process_h = nib.load(tmp_fold+sep+basename+'_Altas_ANTSRegistered.nii.gz')
     file_output_h = nibabel.processing.resample_from_to(file_to_process_h, file_orig_h, order = 0)
     nib.save(file_output_h,outfolder+sep+basename+'_Altas.nii.gz')
+    #Resampling the atlas vasc
+    file_to_process_h = nib.load(tmp_fold+sep+basename+'_AltasVasc_ANTSRegistered.nii.gz')
+    file_output_h = nibabel.processing.resample_from_to(file_to_process_h, file_orig_h, order = 0)
+    nib.save(file_output_h,outfolder+sep+basename+'_AltasVasc.nii.gz')
     #Resampling the segmentation
     file_to_process_h = nib.load(segfile)
     file_output_h = nibabel.processing.resample_from_to(file_to_process_h, file_orig_h, order = 0)
