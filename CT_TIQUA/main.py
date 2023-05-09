@@ -21,6 +21,7 @@ import torch
 # When executing from the commandline (install with pip)
 from .blast_ct.blast_ct.console_tool import console_tool_stand_alone
 from .python_scripts.Volume_estimation import Single_Volume_Inference
+from .python_scripts.Script_Apply_DynUnet import ApplyDynUnet
 
 # When executing this script (from spyder for example)
 #from blast_ct.blast_ct.console_tool import console_tool_stand_alone
@@ -63,12 +64,13 @@ def inference(infile, outfolder, ensemble, keep_tmp_files):
    # 		initial_qform_code = i[1]		
     img_cleaned.set_sform(img_cleaned.get_sform(), code=sform_code)
     img_cleaned.set_qform(img_cleaned.get_qform(), code=qform_code)
-    nib.save(img_cleaned, tmp_fold+basename+'_clean.nii.gz')
+    clean_file =  tmp_fold+basename+'_clean.nii.gz'
+    nib.save(img_cleaned, clean_file)
     print('End of the quality control 1')
     
     #RESAMPLING
     print('Start of the resampling...')
-    im_h = nib.load(tmp_fold+basename+'_clean.nii.gz')
+    im_h = nib.load(clean_file)
     order = 0
     pixdim=[1,1,1]
     Im_resampled = nibabel.processing.resample_to_output(im_h, pixdim, order = order)
@@ -107,19 +109,34 @@ def inference(infile, outfolder, ensemble, keep_tmp_files):
     print('End of the quality control 2')
     
     #SEGMENTATION BLAST
-    print('Start of the segmentation...')
-    segfile = tmp_fold+sep+basename+'_seg.nii.gz'
-    probfile = tmp_fold+sep+basename+'_prob.nii.gz'
-    if torch.cuda.is_available() and torch.cuda.device_count()>0:
-        device = torch.cuda.current_device()
-        print('Segmentation will run on GPU: ID='+str(device)+', NAME: '+torch.cuda.get_device_name(device))
-    else:
-        device = 'cpu'
-        print('Segmentation will run on CPU')
-    console_tool_stand_alone(resampled_file, segfile, device, probfile, ensemble, tmp_fold)
-    print('End of the segmentation')
+    segmentation_model = 'DynUnet'
+    print('Start of the segmentation: '+segmentation_model+'...')
+    if segmentation_model == 'BLAST':
+        segfile = tmp_fold+sep+basename+'_seg.nii.gz'
+        probfile = tmp_fold+sep+basename+'_prob.nii.gz'
+        if torch.cuda.is_available() and torch.cuda.device_count()>0:
+            device = torch.cuda.current_device()
+            print('Segmentation will run on GPU: ID='+str(device)+', NAME: '+torch.cuda.get_device_name(device))
+        else:
+            device = 'cpu'
+            print('Segmentation will run on CPU')
+        console_tool_stand_alone(resampled_file, segfile, device, probfile, ensemble, tmp_fold)
+        
+    elif segmentation_model == 'DynUnet':
+        segfile = tmp_fold+sep+basename+'_Resampled_seg.nii.gz'
+        if torch.cuda.is_available() and torch.cuda.device_count()>0:
+            device = torch.cuda.current_device()
+            print('Segmentation will run on GPU: ID='+str(device)+', NAME: '+torch.cuda.get_device_name(device))
+        else:
+            device = 'cpu'
+            print('Segmentation will run on CPU')
+        model_path = fold+sep+'data'+sep+'Trained_DynUnet.pth'
+        outfolder_seg = tmp_fold
+        ApplyDynUnet(resampled_file, model_path, outfolder_seg, device)        
+        
+        
+    print('End of the segmentation: '+segmentation_model)
     
-    #CHECK THAT SEGMENTATION HAS A QFORMCODE EQUAL TO 1
     
     # REGISTRATION
     print('Start of the linear registration...')
@@ -166,7 +183,6 @@ def inference(infile, outfolder, ensemble, keep_tmp_files):
     print('End of the linear registration')
     
     
-    #CHECK THAT REGISTERED TEMPLATE AND ATLAS HAVE A QFORMCODE EQUAL TO 1
     
     
     
@@ -191,16 +207,15 @@ def inference(infile, outfolder, ensemble, keep_tmp_files):
 
 
     print('Start of the volume computation...')
-    seg = tmp_fold+sep+basename+'_seg.nii.gz'
     atlas = tmp_fold+sep+basename+'_Altas_ANTSRegistered.nii.gz'
     Labels = fold+sep+'data'+sep+'Labels_With_0.csv'
     outcsv = outfolder+sep+basename+'_Volumes.csv'
-    Single_Volume_Inference(atlas, seg, Labels, outcsv)
+    Single_Volume_Inference(atlas, segfile, Labels, outcsv)
     
     atlas = tmp_fold+sep+basename+'_AltasVasc_ANTSRegistered.nii.gz'
     Labels = fold+sep+'data'+sep+'Labels_With_0_vasc.csv'
     outcsv = outfolder+sep+basename+'_Volumes_vasc.csv'
-    Single_Volume_Inference(atlas, seg, Labels, outcsv)
+    Single_Volume_Inference(atlas, segfile, Labels, outcsv)
     
     
     
@@ -210,7 +225,7 @@ def inference(infile, outfolder, ensemble, keep_tmp_files):
     #RESAMPLE ATLAS AND SEGMENTATION TO MATCH THE RESOLUTION OF INPUT CT IMAGE
     print('Start of the final resampling...')
     #Resampling the atlas
-    file_orig_h = nib.load(infile)
+    file_orig_h = nib.load(clean_file)
     file_to_process_h = nib.load(tmp_fold+sep+basename+'_Altas_ANTSRegistered.nii.gz')
     file_output_h = nibabel.processing.resample_from_to(file_to_process_h, file_orig_h, order = 0)
     nib.save(file_output_h,outfolder+sep+basename+'_Altas.nii.gz')
@@ -222,6 +237,11 @@ def inference(infile, outfolder, ensemble, keep_tmp_files):
     file_to_process_h = nib.load(segfile)
     file_output_h = nibabel.processing.resample_from_to(file_to_process_h, file_orig_h, order = 0)
     nib.save(file_output_h,outfolder+sep+basename+'_Segmentation.nii.gz')
+    #Resampling the resampled input image
+    file_to_process_h = nib.load(resampled_file)
+    file_output_h = nibabel.processing.resample_from_to(file_to_process_h, file_orig_h, order = 1)
+    nib.save(file_output_h,outfolder+sep+basename+'_CT.nii.gz')
+    
     
     print('End of the final resampling')
     
