@@ -34,7 +34,7 @@ def inference(infile, outfolder, ensemble, keep_tmp_files):
     print('Summary:')
     print('infile='+infile)
     print('outfolder='+outfolder)
-    print('ensemble='+str(ensemble))
+    #print('ensemble='+str(ensemble))
     print('keep_tmp_files='+str(keep_tmp_files))
     sep = os.sep
     basename = os.path.basename(infile).split('.')[0]
@@ -130,7 +130,8 @@ def inference(infile, outfolder, ensemble, keep_tmp_files):
         else:
             device = 'cpu'
             print('Segmentation will run on CPU')
-        model_path = fold+sep+'data'+sep+'Trained_DynUnet.pth'
+        #model_path = fold+sep+'data'+sep+'Trained_DynUnet.pth'
+	model_path = fold+sep+'data'+sep+'03-07-23-09h45m_finetune_Ovalis_round2.pt'
         outfolder_seg = tmp_fold
         ApplyDynUnet(resampled_file, model_path, outfolder_seg, device)        
         
@@ -238,9 +239,9 @@ def inference(infile, outfolder, ensemble, keep_tmp_files):
     file_output_h = nibabel.processing.resample_from_to(file_to_process_h, file_orig_h, order = 0)
     nib.save(file_output_h,outfolder+sep+basename+'_Segmentation.nii.gz')
     #Resampling the resampled input image
-    file_to_process_h = nib.load(resampled_file)
-    file_output_h = nibabel.processing.resample_from_to(file_to_process_h, file_orig_h, order = 1)
-    nib.save(file_output_h,outfolder+sep+basename+'_CT.nii.gz')
+    #file_to_process_h = nib.load(resampled_file)
+    #file_output_h = nibabel.processing.resample_from_to(file_to_process_h, file_orig_h, order = 1)
+    #nib.save(file_output_h,outfolder+sep+basename+'_CT.nii.gz')
     
     
     print('End of the final resampling')
