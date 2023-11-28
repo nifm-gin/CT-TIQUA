@@ -28,13 +28,12 @@ from .python_scripts.Script_Apply_DynUnet import ApplyDynUnet
 #from python_scripts.Volume_estimation import Single_Volume_Inference
 
 
-def inference(infile, outfolder, ensemble, keep_tmp_files):
+def inference(infile, outfolder, keep_tmp_files):
    
     print('Start of the pipeline...')
     print('Summary:')
     print('infile='+infile)
     print('outfolder='+outfolder)
-    print('ensemble='+str(ensemble))
     print('keep_tmp_files='+str(keep_tmp_files))
     sep = os.sep
     basename = os.path.basename(infile).split('.')[0]
@@ -85,9 +84,6 @@ def inference(infile, outfolder, ensemble, keep_tmp_files):
     
     #BRAIN EXTRACTION
     print('Start of the brain extraction...')
-    #matlab_runtime_path = fold+sep+'matlab_scripts'+sep+'RunTime'+sep+'v910'
-    #matlab_App_path = fold+sep+'matlab_scripts'+sep+'App'+sep+'application'+sep+'run_SkullStrip.sh'
-    #print(matlab_runtime_path)
     outimage = tmp_fold+basename+'_SkullStripped.nii'
     outROI = tmp_fold+basename+'_ROI.nii'
     cmdline = matlab_App_path+' ' + matlab_runtime_path + ' ' + resampled_file + ' ' + outimage + ' ' + outROI
@@ -108,32 +104,37 @@ def inference(infile, outfolder, ensemble, keep_tmp_files):
     nib.save(img_h, tmp_fold+basename+'_SkullStripped_clean.nii.gz')
     print('End of the quality control 2')
     
-    #SEGMENTATION BLAST
+    #SEGMENTATION DynUnet
     segmentation_model = 'DynUnet'
     print('Start of the segmentation: '+segmentation_model+'...')
-    if segmentation_model == 'BLAST':
-        segfile = tmp_fold+sep+basename+'_seg.nii.gz'
-        probfile = tmp_fold+sep+basename+'_prob.nii.gz'
-        if torch.cuda.is_available() and torch.cuda.device_count()>0:
-            device = torch.cuda.current_device()
-            print('Segmentation will run on GPU: ID='+str(device)+', NAME: '+torch.cuda.get_device_name(device))
-        else:
-            device = 'cpu'
-            print('Segmentation will run on CPU')
-        console_tool_stand_alone(resampled_file, segfile, device, probfile, ensemble, tmp_fold)
-        
-    elif segmentation_model == 'DynUnet':
-        segfile = tmp_fold+sep+basename+'_Resampled_seg.nii.gz'
-        if torch.cuda.is_available() and torch.cuda.device_count()>0:
-            device = torch.cuda.current_device()
-            print('Segmentation will run on GPU: ID='+str(device)+', NAME: '+torch.cuda.get_device_name(device))
-        else:
-            device = 'cpu'
-            print('Segmentation will run on CPU')
-        model_path = fold+sep+'data'+sep+'Trained_DynUnet.pth'
-        outfolder_seg = tmp_fold
-        ApplyDynUnet(resampled_file, model_path, outfolder_seg, device)        
-        
+  
+    segfile = tmp_fold+sep+basename+'_Resampled_seg.nii.gz'
+    if torch.cuda.is_available() and torch.cuda.device_count()>0:
+        device = torch.cuda.current_device()
+        print('Segmentation will run on GPU: ID='+str(device)+', NAME: '+torch.cuda.get_device_name(device))
+    else:
+        device = 'cpu'
+        print('Segmentation will run on CPU')
+
+    model_path = fold+sep+'data'+sep+'24-02-23-13h18m_best_model.pt'
+    print(model_path)
+    outfolder_seg = tmp_fold
+
+    # Uncomment this code if you want to apply DynUnet on resampled images
+    # print('Start of the segmentation: '+segmentation_model+' on resampled images (1mm3)...')
+    # ApplyDynUnet(resampled_file, model_path, outfolder_seg, device)
+    # segfile = tmp_fold+sep+basename+'_Resampled_seg.nii.gz'
+
+    # here we choose to apply DynUnet on raw images
+    print('Start of the segmentation: '+segmentation_model+' on raw images (xxmm3)...')
+    ApplyDynUnet(infile, model_path, outfolder_seg, device)
+    tmp_segfile = tmp_fold+sep+basename+'_seg.nii.gz'
+    tmp_seg = nib.load(tmp_segfile)
+    Seg_resampled = nibabel.processing.resample_to_output(tmp_seg, pixdim, order = 0,  mode='nearest')
+    segfile = tmp_fold+sep+basename+'_Resampled_seg.nii.gz'
+    nib.save(Seg_resampled, segfile)
+    print('segmentation has been resampled to 1mm3')
+
         
     print('End of the segmentation: '+segmentation_model)
     
@@ -238,9 +239,9 @@ def inference(infile, outfolder, ensemble, keep_tmp_files):
     file_output_h = nibabel.processing.resample_from_to(file_to_process_h, file_orig_h, order = 0)
     nib.save(file_output_h,outfolder+sep+basename+'_Segmentation.nii.gz')
     #Resampling the resampled input image
-    file_to_process_h = nib.load(resampled_file)
-    file_output_h = nibabel.processing.resample_from_to(file_to_process_h, file_orig_h, order = 1)
-    nib.save(file_output_h,outfolder+sep+basename+'_CT.nii.gz')
+    #file_to_process_h = nib.load(resampled_file)
+    #file_output_h = nibabel.processing.resample_from_to(file_to_process_h, file_orig_h, order = 1)
+    #nib.save(file_output_h,outfolder+sep+basename+'_CT.nii.gz')
     
     
     print('End of the final resampling')
