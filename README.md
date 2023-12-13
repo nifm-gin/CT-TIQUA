@@ -23,9 +23,9 @@ To use this software :
 * 3/ Download the docker image containing all the tools needed by CT-TIQUA and run the image:
 These two steps are achieved by the command:
 
-`docker run --entrypoint=/bin/sh --rm -v /Path/input/data:/Path/input/data -w /Path/input/data -it --ipc=host brosscle/ct-tiqua:3.2`
+`docker run --entrypoint=/bin/sh --rm -v /Path/input/data:/Path/input/data -w /Path/input/data -it --ipc=host nifmgin/ct-tiqua:3.2`
 
-Details of the docker image are available here : https://hub.docker.com/repository/docker/brosscle/ct-tiqua/general
+Details of the docker image are available here : https://hub.docker.com/repository/docker/nifmgin/ct-tiqua/general
 
 * 4/ You are now in the interactive mode of the docker image (it can be assessed by the `#` at the beginning of your commandline). Now we can execute CT-TIQUA in the docker image:
 
