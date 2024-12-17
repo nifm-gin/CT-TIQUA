@@ -19,6 +19,7 @@ def path(string):
 
 
 def console_tool():
+    #parse the arguments
     parser = argparse.ArgumentParser()
     parser.add_argument('--input', metavar='input', type=path, help='Path to input image, as a nifti file, compressed of not (str).', required=True)
     parser.add_argument('--output', metavar='output', type=str, help='Path to the output folder where output data will be stored (str).', required=True)
