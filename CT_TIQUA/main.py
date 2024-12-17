@@ -1,155 +1,138 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Fri Mar 18 15:52:21 2022
+import sys
 
-@author: clement
-"""
-
-
-import nibabel as nib
-import nibabel.processing
-import socket
 import os
+import nibabel as nib
+import numpy as np
 import shutil
 
 from nipype.interfaces import fsl
 import ants
 import torch
+from totalsegmentator.python_api import totalsegmentator
+
+from python_scripts.Volume_estimation import Single_Volume_Inference, ventricle_volume_computation
+from python_scripts.Script_Apply_DynUnet import ApplyDynUnet
 
 
-# When executing from the commandline (install with pip)
-from .blast_ct.blast_ct.console_tool import console_tool_stand_alone
-from .python_scripts.Volume_estimation import Single_Volume_Inference
-from .python_scripts.Script_Apply_DynUnet import ApplyDynUnet
 
-# When executing this script (from spyder for example)
-#from blast_ct.blast_ct.console_tool import console_tool_stand_alone
-#from python_scripts.Volume_estimation import Single_Volume_Inference
+# ---------------------- CONSTANTS ----------------------
+
+MAIN_DIRECTORY = ""
+
+TEMP_DIRECTORY = ""
+
+OUT_DIRECTORY = ""
+
+DATA_DIRECTORY = ""
+
+VENTRICLES = False
+
+CLAMP_LOW_THRESHOLD = 1.0
+CLAMP_HIGH_THRESHOLD = 80
+
+PIXDIM = [1,1,1]
 
 
-def inference(infile, outfolder, keep_tmp_files):
-   
-    print('Start of the pipeline...')
-    print('Summary:')
-    print('infile='+infile)
-    print('outfolder='+outfolder)
-    print('keep_tmp_files='+str(keep_tmp_files))
-    sep = os.sep
-    basename = os.path.basename(infile).split('.')[0]
-    tmp_fold = outfolder+sep+'tmp'+sep
-    os.makedirs(tmp_fold, exist_ok=True)
+# ---------------------- Utility Functions ----------------------
+
+def clamp_values(image, low_threshold, high_threshold):
+    new_img = image.copy()
     
-    fold = sep.join(os.path.realpath(__file__).split(sep)[:-1])
+    new_img[new_img < low_threshold] = 0
+    new_img[new_img > high_threshold] = high_threshold
+    return new_img
+
+def histogram_matching(target, source):
+    n_bins = 100
+    
+    mask_target = target > 1e-5
+    hist_target, edge_bin_T = np.histogram(target[mask_target], bins=n_bins, density=True)
+    cdf_target = hist_target.cumsum()
     
 
-    matlab_App_path = sep+'compiled_matlab_scripts'+sep+'App'+sep+'application'+sep+'run_SkullStrip.sh'
-    matlab_runtime_path = sep+'compiled_matlab_scripts'+sep+'RunTime'+sep+'v910'
-    print('matlab_App_path='+matlab_App_path)
-    print('matlab_runtime_path='+matlab_runtime_path)
+    hist_source, edge_bin_S = np.histogram(source[source > 0], bins=n_bins, density=True)
+    cdf_source = hist_source.cumsum()
     
-    #CHECK THAT INPUT IMAGE HAS A QFORMCODE EQUAL TO 1
-    print('Start of the quality control 1...')
-    opt={"Sform_code":'aligned', "Qform_code":'unknown'}
-    img_h = nib.load(infile)
-    Vol = img_h.get_fdata()
-    img_cleaned = nib.Nifti1Image(Vol, img_h.affine)
-    sform_code = opt['Sform_code']
-    qform_code = opt['Qform_code']
-    #for i in img_h.header.items():
-   # 	if i[0]=='sform_code':
-   # 		initial_sform_code = i[1]
-   # 	elif i[O]=='qform_code':
-   # 		initial_qform_code = i[1]		
-    img_cleaned.set_sform(img_cleaned.get_sform(), code=sform_code)
-    img_cleaned.set_qform(img_cleaned.get_qform(), code=qform_code)
-    clean_file =  tmp_fold+basename+'_clean.nii.gz'
-    nib.save(img_cleaned, clean_file)
-    print('End of the quality control 1')
-    
-    #RESAMPLING
-    print('Start of the resampling...')
-    im_h = nib.load(clean_file)
-    order = 0
-    pixdim=[1,1,1]
-    Im_resampled = nibabel.processing.resample_to_output(im_h, pixdim, order = order)
-    resampled_file = tmp_fold+basename+'_Resampled.nii'
-    nib.save(Im_resampled, resampled_file)
-    print('End of the resampling')
-    
-    
-    # #CHECK THAT RESAMPLED IMAGE HAS A QFORMCODE EQUAL TO 1
-    
-    
-    
-    #BRAIN EXTRACTION
-    print('Start of the brain extraction...')
-    outimage = tmp_fold+basename+'_SkullStripped.nii'
-    outROI = tmp_fold+basename+'_ROI.nii'
-    cmdline = matlab_App_path+' ' + matlab_runtime_path + ' ' + resampled_file + ' ' + outimage + ' ' + outROI
-    #print(cmdline)
-    os.system(cmdline)
-    print('End of the brain extraction')
-    
-    
-    #CHECK THAT SKULL STRIPPED AND ROI HAVE A QFORMCODE EQUAL TO 1
-    
-    print('Start of the quality control 2...')
-    opt={"Sform_code":'scanner', "Qform_code":'scanner'}
-    img_h = nib.load(tmp_fold+basename+'_SkullStripped.nii.gz')
-    sform_code = opt['Sform_code']
-    qform_code = opt['Qform_code']
-    img_h.set_sform(img_h.get_sform(), code=sform_code)
-    img_h.set_qform(img_h.get_qform(), code=qform_code)
-    nib.save(img_h, tmp_fold+basename+'_SkullStripped_clean.nii.gz')
-    print('End of the quality control 2')
-    
-    #SEGMENTATION DynUnet
-    segmentation_model = 'DynUnet'
-    print('Start of the segmentation: '+segmentation_model+'...')
-  
-    segfile = tmp_fold+sep+basename+'_Resampled_seg.nii.gz'
+    # creating the new image
+    new_T = np.zeros_like(target)
+    for i, (gt_m, gt_M) in enumerate(zip(edge_bin_T[:-1], edge_bin_T[1:])):
+        gs = np.argmin(np.abs(cdf_target[i] - cdf_source))
+        mask_gt = np.logical_and((target > gt_m), (target < gt_M))
+        np.putmask(new_T, mask_gt, (gs / n_bins))
+
+    new_T[~mask_target] = 0
+    return new_T
+
+# ---------------------- Main Steps ----------------------
+
+def brain_extraction(basename, device):
+    # remove the skull to have a better atlas registration
+
     if torch.cuda.is_available() and torch.cuda.device_count()>0:
-        device = torch.cuda.current_device()
-        print('Segmentation will run on GPU: ID='+str(device)+', NAME: '+torch.cuda.get_device_name(device))
+        device = f"gpu:{torch.cuda.current_device()}"
+        
     else:
         device = 'cpu'
         print('Segmentation will run on CPU')
 
-    model_path = fold+sep+'data'+sep+'24-02-23-13h18m_best_model.pt'
-    print(model_path)
-    outfolder_seg = tmp_fold
 
-    # Uncomment this code if you want to apply DynUnet on resampled images
-    # print('Start of the segmentation: '+segmentation_model+' on resampled images (1mm3)...')
-    # ApplyDynUnet(resampled_file, model_path, outfolder_seg, device)
-    # segfile = tmp_fold+sep+basename+'_Resampled_seg.nii.gz'
+    totalsegmentator(TEMP_DIRECTORY+basename+"_resampled.nii.gz", TEMP_DIRECTORY, roi_subset=["brain"], device=device)
+    brain_mask = nib.load(TEMP_DIRECTORY+"brain.nii.gz")
+    original_img = nib.load(TEMP_DIRECTORY+basename+"_resampled.nii.gz")
+    TTS_extracted_brain = nib.Nifti1Image(brain_mask.get_fdata()*original_img.get_fdata(), original_img.affine, original_img.header)
+    nib.save(TTS_extracted_brain, TEMP_DIRECTORY+basename+"_TTS_skullstripped.nii.gz")
 
-    # here we choose to apply DynUnet on raw images
-    print('Start of the segmentation: '+segmentation_model+' on raw images (xxmm3)...')
-    ApplyDynUnet(infile, model_path, outfolder_seg, device)
-    tmp_segfile = tmp_fold+sep+basename+'_seg.nii.gz'
-    tmp_seg = nib.load(tmp_segfile)
-    Seg_resampled = nibabel.processing.resample_to_output(tmp_seg, pixdim, order = 0,  mode='nearest')
-    segfile = tmp_fold+sep+basename+'_Resampled_seg.nii.gz'
-    nib.save(Seg_resampled, segfile)
-    print('segmentation has been resampled to 1mm3')
 
-        
-    print('End of the segmentation: '+segmentation_model)
+def segmentation(basename, device):
+    # Lesion and ventricle segmentation
     
+    print('Start of the lesion segmentation: DynUnet on raw images (xxmm3)...')
     
+    model_path = DATA_DIRECTORY+"24-02-23-13h18m_best_model.pt"
+    
+    ApplyDynUnet(TEMP_DIRECTORY+basename+'_clean.nii.gz', model_path, TEMP_DIRECTORY, device)
+
+    tmp_seg = nib.load(TEMP_DIRECTORY+basename+'_clean_seg.nii.gz')
+    seg_resampled = nib.processing.resample_to_output(tmp_seg, PIXDIM, order = 0,  mode='nearest')
+    nib.save(seg_resampled, TEMP_DIRECTORY+basename+'_Resampled_seg.nii.gz')
+    
+    if VENTRICLES:
+        totalsegmentator(TEMP_DIRECTORY+basename+'_clean.nii.gz', TEMP_DIRECTORY+basename+"_brain_structures", task="brain_structures")
+
+    # save lesion segmentatoin
+    file_to_process_h = tmp_seg
+    file_orig_h = nib.load(TEMP_DIRECTORY+basename+'_clean.nii.gz')
+    file_output_h = nib.processing.resample_from_to(file_to_process_h, file_orig_h, order = 0)
+    nib.save(file_output_h,OUT_DIRECTORY+basename+'_Segmentation.nii.gz')
+
+
+
+
+def FLIRT_ANTS_registration(basename, hist_match_bool):
+    # Linear and elastic registration of the atlas onto the brain CT scan
+    # in order to identify the anatomical regions of the brain scan
+
+    brain_extraction_method = "TTS"
+
     # REGISTRATION
     print('Start of the linear registration...')
-    Atlas = fold+sep+'data'+sep+'Resliced_Registered_Labels_mod.nii.gz'
-    Atlas_vasc = fold+sep+'data'+sep+'ArterialAtlas.nii.gz'
-    Template = fold+sep+'data'+sep+'TEMPLATE_miplab-ncct_sym_brain.nii.gz'
+    Atlas = DATA_DIRECTORY+'Resliced_Registered_Labels_mod.nii.gz'
+    Atlas_vasc = DATA_DIRECTORY+'ArterialAtlas.nii.gz'
+
+    hist_match = ""
+
+    if hist_match_bool:
+        template = DATA_DIRECTORY+'hist_match_TEMPLATE_miplab-ncct_sym_brain.nii.gz'
+        hist_match = "_hist_match"
+    else:
+        template = DATA_DIRECTORY+'TEMPLATE_miplab-ncct_sym_brain.nii.gz'
+    
     flt = fsl.FLIRT()
 
-    flt.inputs.in_file = Template
-    flt.inputs.reference = tmp_fold+basename+'_SkullStripped_clean.nii.gz'
-    flt.inputs.out_file = tmp_fold+basename+'_Template_FLIRTRegistered.nii'
-    flt.inputs.out_matrix_file = tmp_fold+basename+ '_FLIRTRegisteredTemplate_transform-matrix.mat'
+    flt.inputs.in_file = template
+    flt.inputs.reference = TEMP_DIRECTORY+basename+'_'+brain_extraction_method+hist_match+'_skullstripped.nii.gz'
+    flt.inputs.out_file = TEMP_DIRECTORY+basename+'_'+brain_extraction_method+'_Template_FLIRT'+hist_match+'_Registered.nii.gz'
+    flt.inputs.out_matrix_file = TEMP_DIRECTORY+basename+'_'+brain_extraction_method+'_FLIRT'+hist_match+'_RegisteredTemplate_transform-matrix.mat'
     flt.inputs.dof = 7
     flt.inputs.bins = 256
     flt.inputs.cost_func = 'normcorr'
@@ -159,102 +142,176 @@ def inference(infile, outfolder, keep_tmp_files):
     flt.inputs.searchr_z = [-180, 180]
     flt.run()
     
-
-
     applyxfm = fsl.ApplyXFM()
-    applyxfm.inputs.in_matrix_file = tmp_fold+basename+ '_FLIRTRegisteredTemplate_transform-matrix.mat'
+    applyxfm.inputs.in_matrix_file = TEMP_DIRECTORY+basename+'_'+brain_extraction_method+'_FLIRT'+hist_match+'_RegisteredTemplate_transform-matrix.mat'
     applyxfm.inputs.in_file = Atlas
-    applyxfm.inputs.out_file = tmp_fold+basename+'_Altas_FLIRTRegistered.nii'
-    applyxfm.inputs.reference = tmp_fold+basename+'_SkullStripped_clean.nii.gz'
+    applyxfm.inputs.out_file = TEMP_DIRECTORY+basename+'_'+brain_extraction_method+'_Atlas_FLIRT'+hist_match+'_Registered.nii.gz'
+    applyxfm.inputs.reference = TEMP_DIRECTORY+basename+'_'+brain_extraction_method+hist_match+'_skullstripped.nii.gz'
     applyxfm.inputs.apply_xfm = True
-    applyxfm.inputs.out_matrix_file = tmp_fold+basename+ '_FLIRTRegisteredAtlas_transform-matrix.mat'
+    applyxfm.inputs.out_matrix_file = TEMP_DIRECTORY+basename+'_'+brain_extraction_method+'_FLIRT'+hist_match+'_RegisteredAtlas_transform-matrix.mat'
     applyxfm.inputs.interp = 'nearestneighbour'
     applyxfm.run()
             
     applyxfm = fsl.ApplyXFM()
-    applyxfm.inputs.in_matrix_file = tmp_fold+basename+ '_FLIRTRegisteredTemplate_transform-matrix.mat'
+    applyxfm.inputs.in_matrix_file = TEMP_DIRECTORY+basename+'_'+brain_extraction_method+'_FLIRT'+hist_match+'_RegisteredTemplate_transform-matrix.mat'
     applyxfm.inputs.in_file = Atlas_vasc
-    applyxfm.inputs.out_file = tmp_fold+basename+'_AltasVasc_FLIRTRegistered.nii'
-    applyxfm.inputs.reference = tmp_fold+basename+'_SkullStripped_clean.nii.gz'
+    applyxfm.inputs.out_file = TEMP_DIRECTORY+basename+'_'+brain_extraction_method+'_AtlasVasc_FLIRT'+hist_match+'_Registered.nii.gz'
+    applyxfm.inputs.reference = TEMP_DIRECTORY+basename+'_'+brain_extraction_method+hist_match+'_skullstripped.nii.gz'
     applyxfm.inputs.apply_xfm = True
-    applyxfm.inputs.out_matrix_file = tmp_fold+basename+ '_FLIRTRegisteredAtlasVasc_transform-matrix.mat'
+    applyxfm.inputs.out_matrix_file = TEMP_DIRECTORY+basename+'_'+brain_extraction_method+'_FLIRT'+hist_match+'_RegisteredAtlasVasc_transform-matrix.mat'
     applyxfm.inputs.interp = 'nearestneighbour'
     applyxfm.run()
     
     print('End of the linear registration')
     
-    
-    
-    
-    
     print('Start of the elastic registration...')
-    img_fixed = ants.image_read(tmp_fold+basename+'_SkullStripped_clean.nii.gz')
-    img_moving = ants.image_read(tmp_fold+basename+'_Template_FLIRTRegistered.nii')
-    outprefix=tmp_fold+basename
+    img_fixed = ants.image_read(TEMP_DIRECTORY+basename+'_'+brain_extraction_method+hist_match+'_skullstripped.nii.gz')
+    img_moving = ants.image_read(TEMP_DIRECTORY+basename+'_'+brain_extraction_method+'_Template_FLIRT'+hist_match+'_Registered.nii.gz')
+    outprefix=TEMP_DIRECTORY+basename
     reg = ants.registration(img_fixed, img_moving, outprefix=outprefix, random_seed=42)
-    reg['warpedmovout'].to_file(tmp_fold+basename+'_Template_ANTSRegistered.nii.gz')
+    reg['warpedmovout'].to_file(TEMP_DIRECTORY+basename+'_'+brain_extraction_method+'_Template_ANTS'+hist_match+'_Registered.nii.gz')
     
     mytx = reg['fwdtransforms']
-    im_to_embarque = ants.image_read(tmp_fold+basename+'_Altas_FLIRTRegistered.nii')
+    im_to_embarque = ants.image_read(TEMP_DIRECTORY+basename+'_'+brain_extraction_method+'_Atlas_FLIRT'+hist_match+'_Registered.nii.gz')
     embarqued_im = ants.apply_transforms(img_fixed, im_to_embarque, transformlist=mytx, interpolator='nearestNeighbor')
-    embarqued_im.to_file(tmp_fold+sep+basename+'_Altas_ANTSRegistered.nii.gz')
+    embarqued_im.to_file(TEMP_DIRECTORY+basename+'_'+brain_extraction_method+'_Atlas_ANTS'+hist_match+'_Registered.nii.gz')
     
-    im_to_embarque = ants.image_read(tmp_fold+basename+'_AltasVasc_FLIRTRegistered.nii')
+    im_to_embarque = ants.image_read(TEMP_DIRECTORY+basename+'_'+brain_extraction_method+'_AtlasVasc_FLIRT'+hist_match+'_Registered.nii.gz')
     embarqued_im = ants.apply_transforms(img_fixed, im_to_embarque, transformlist=mytx, interpolator='nearestNeighbor')
-    embarqued_im.to_file(tmp_fold+sep+basename+'_AltasVasc_ANTSRegistered.nii.gz')
+    embarqued_im.to_file(TEMP_DIRECTORY+basename+'_'+brain_extraction_method+'_AtlasVasc_ANTS'+hist_match+'_Registered.nii.gz')
     
     print('End of the elastic registration')
-    
+
+    file_orig_h = nib.load(TEMP_DIRECTORY+basename+'_clean.nii.gz')
+    file_to_process_h = nib.load(TEMP_DIRECTORY+basename+'_TTS_Atlas_ANTS_hist_match_Registered.nii.gz')
+    file_output_h = nib.processing.resample_from_to(file_to_process_h, file_orig_h, order = 0)
+    nib.save(file_output_h,OUT_DIRECTORY+basename+'_Altas.nii.gz')
+
+    file_to_process_h = nib.load(TEMP_DIRECTORY+basename+'_TTS_AtlasVasc_ANTS_hist_match_Registered.nii.gz')
+    file_output_h = nib.processing.resample_from_to(file_to_process_h, file_orig_h, order = 0)
+    nib.save(file_output_h,OUT_DIRECTORY+basename+'_AltasVasc.nii.gz')
 
 
-    print('Start of the volume computation...')
-    atlas = tmp_fold+sep+basename+'_Altas_ANTSRegistered.nii.gz'
-    Labels = fold+sep+'data'+sep+'Labels_With_0.csv'
-    outcsv = outfolder+sep+basename+'_Volumes.csv'
-    Single_Volume_Inference(atlas, segfile, Labels, outcsv)
+def volume_computation(basename):
+    # Compute the volume of each type of lesions in each atlas region
+
+    brain_extraction_method = "TTS"
+    registration_method = "ANTS_hist_match"
+
+    print(f"Volume inference regular atlas on: {basename}, brain extraction: {brain_extraction_method}, registration: {registration_method}")
+
+
+
+    segfile = TEMP_DIRECTORY+basename+'_Resampled_seg.nii.gz'
+    atlas = TEMP_DIRECTORY+basename+'_'+brain_extraction_method+'_Atlas_'+registration_method+"_Registered.nii.gz"
+    outcsv = OUT_DIRECTORY+basename+'_Volumes.csv'
+    Single_Volume_Inference(atlas, segfile, DATA_DIRECTORY+'Labels_With_0.csv', outcsv)
     
-    atlas = tmp_fold+sep+basename+'_AltasVasc_ANTSRegistered.nii.gz'
-    Labels = fold+sep+'data'+sep+'Labels_With_0_vasc.csv'
-    outcsv = outfolder+sep+basename+'_Volumes_vasc.csv'
-    Single_Volume_Inference(atlas, segfile, Labels, outcsv)
+    print(f"Volume inference vascular atlas on: {basename}, brain extraction: {brain_extraction_method}, registration: {registration_method}")
+
+    atlas = TEMP_DIRECTORY+basename+'_'+brain_extraction_method+'_AtlasVasc_'+registration_method+"_Registered.nii.gz"
+    outcsv = OUT_DIRECTORY+basename+'_VolumesVasc.csv'
+    Single_Volume_Inference(atlas, segfile, DATA_DIRECTORY+'Labels_With_0_vasc.csv', outcsv)
+
+    if VENTRICLES:
+        ventricle_volume_computation(TEMP_DIRECTORY+basename+"_brain_structures/ventricle.nii.gz", OUT_DIRECTORY+basename+'_ventricle_volume.csv')
+
+
+# ---------------------- Main Process ----------------------
+
+def inference(infile, outfolder, keep_tmp_files, ventricles_seg=False):
+
+    print('Start of the pipeline:')
+    print('infile='+infile)
+    print('outfolder='+outfolder)
+    print('keep_tmp_files='+str(keep_tmp_files))
+    if not outfolder[-1] == '/':
+        outfolder += '/'
+    basename = os.path.basename(infile).split('.')[0]
+    temp_folder = outfolder+'tmp/'
+    os.makedirs(temp_folder, exist_ok=True)
+
+
+    if ventricles_seg:
+        global VENTRICLES
+        VENTRICLES = True
+    global OUT_DIRECTORY
+    OUT_DIRECTORY = outfolder
+    global TEMP_DIRECTORY 
+    TEMP_DIRECTORY = temp_folder
+    global DATA_DIRECTORY 
+    DATA_DIRECTORY = os.sep.join(os.path.realpath(__file__).split(os.sep)[:-1])+"/data/"
+
+    # use GPU if available
+    if torch.cuda.is_available() and torch.cuda.device_count()>0:
+        device = torch.cuda.current_device()
+        print('Segmentation will run on GPU: ID='+str(device)+', NAME: '+torch.cuda.get_device_name(device))
+    else:
+        device = 'cpu'
+        print('Segmentation will run on CPU')
+
+
+    # Make clamped and normalized Template source file
+    template = nib.load(DATA_DIRECTORY+'TEMPLATE_miplab-ncct_sym_brain.nii.gz')
+    template_data = template.get_fdata()
+    template_data = clamp_values(template_data, CLAMP_LOW_THRESHOLD, CLAMP_HIGH_THRESHOLD)
+    template_data = template_data/np.max(template_data)
+    new_template = nib.Nifti1Image(template_data, template.affine, template.header)
+    nib.save(new_template, DATA_DIRECTORY+'hist_match_TEMPLATE_miplab-ncct_sym_brain.nii.gz')
+
+
+    opt={"Sform_code":'aligned', "Qform_code":'unknown'}
+
+    #sometimes the image is broken and can't be loaded
+    try:
+        img = nib.load(infile)
+        img_data = img.get_fdata()
+    except:
+        print(f"Error loading input file f{infile}")
+        return
     
+    img_cleaned = nib.Nifti1Image(img_data, img.affine)
+    sform_code = opt['Sform_code']
+    qform_code = opt['Qform_code']	
+    img_cleaned.set_sform(img_cleaned.get_sform(), code=sform_code)
+    img_cleaned.set_qform(img_cleaned.get_qform(), code=qform_code)
+    clean_file =  TEMP_DIRECTORY+basename+'_clean.nii.gz'
+    nib.save(img_cleaned, clean_file)
+
+    initial_img = nib.load(TEMP_DIRECTORY+basename+"_clean.nii.gz")
+    pixdim = [1,1,1]
+    img_resampled = nib.processing.resample_to_output(initial_img, pixdim, order=0)
+    nib.save(img_resampled, TEMP_DIRECTORY+basename+"_resampled.nii.gz")
+
+
+    brain_extraction(basename, str(device))
     
+    segmentation(basename, device)
     
-    print('End of the volume computation')
-    
-    
-    #RESAMPLE ATLAS AND SEGMENTATION TO MATCH THE RESOLUTION OF INPUT CT IMAGE
-    print('Start of the final resampling...')
-    #Resampling the atlas
-    file_orig_h = nib.load(clean_file)
-    file_to_process_h = nib.load(tmp_fold+sep+basename+'_Altas_ANTSRegistered.nii.gz')
-    file_output_h = nibabel.processing.resample_from_to(file_to_process_h, file_orig_h, order = 0)
-    nib.save(file_output_h,outfolder+sep+basename+'_Altas.nii.gz')
-    #Resampling the atlas vasc
-    file_to_process_h = nib.load(tmp_fold+sep+basename+'_AltasVasc_ANTSRegistered.nii.gz')
-    file_output_h = nibabel.processing.resample_from_to(file_to_process_h, file_orig_h, order = 0)
-    nib.save(file_output_h,outfolder+sep+basename+'_AltasVasc.nii.gz')
-    #Resampling the segmentation
-    file_to_process_h = nib.load(segfile)
-    file_output_h = nibabel.processing.resample_from_to(file_to_process_h, file_orig_h, order = 0)
-    nib.save(file_output_h,outfolder+sep+basename+'_Segmentation.nii.gz')
-    #Resampling the resampled input image
-    #file_to_process_h = nib.load(resampled_file)
-    #file_output_h = nibabel.processing.resample_from_to(file_to_process_h, file_orig_h, order = 1)
-    #nib.save(file_output_h,outfolder+sep+basename+'_CT.nii.gz')
-    
-    
-    print('End of the final resampling')
-    
+
+    try:
+        reference = nib.load(TEMP_DIRECTORY+basename+'_TTS_skullstripped.nii.gz')
+    except:
+        print("FILE LOADING ERROR ")
+
+    reference_data = reference.get_fdata()
+
+    # values below low_threshold are set to 0 and values over high_threshold are set to high_threshold. Important otherwise the histogram matching won't perform correctly
+    reference_data = clamp_values(reference_data, CLAMP_LOW_THRESHOLD, CLAMP_HIGH_THRESHOLD)
+    reference_data = reference_data/np.max(reference_data) # normalize values between 0 and 1
+    reference_data = histogram_matching(reference_data, nib.load(DATA_DIRECTORY+'hist_match_TEMPLATE_miplab-ncct_sym_brain.nii.gz').get_fdata())
+    new_reference_data = nib.Nifti1Image(reference_data, reference.affine, reference.header)
+    nib.save(new_reference_data, TEMP_DIRECTORY+basename+'_TTS_hist_match'+'_skullstripped.nii.gz')
+
+
+    FLIRT_ANTS_registration(basename, hist_match_bool=True)
+
+
+    volume_computation(basename)
+
+    # move all the temp files to a temp subdirectory with the patient number.
     if not keep_tmp_files:
         print('Removing of the temporary files...')
-        #shutil.rmtree(tmp_fold+'blast_ct'+sep)
-        shutil.rmtree(tmp_fold, ignore_errors=True)
-    
-    print('End of the pipeline')
-
-
-
-
+        shutil.rmtree(TEMP_DIRECTORY, ignore_errors=True)
 
 

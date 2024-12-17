@@ -1,4 +1,4 @@
-# CT-TIQUA V3.2
+# CT-TIQUA V4.0
 
 Computed Tomography based Traumatic Brain Injury Quantification
 
@@ -7,6 +7,7 @@ This software takes as input a CT-scan of a head injured patient and returns:
 * 2/ a structural atlas dividing the input brain in 52 zones
 * 3/ a vascular atlas dividing the input brain in 32 zones (from Liu, CF., Hsu, J., Xu, X. et al. Digital 3D Brain MRI Arterial Territories Atlas. Sci Data 10, 74 (2023). https://doi.org/10.1038/s41597-022-01923-0)
 * 3/ Two csv files containing the volume in mm3 of all type on lesion in all zone of the brain (one for each atlas)
+* 4/ A csv file containing the ventricles volume (using TotalSegmentator Wasserthal, J., Breit, H. C., Meyer, M. T., Pradella, M., Hinck, D., Sauter, A. W., ... & Segeroth, M. (2023). TotalSegmentator: robust segmentation of 104 anatomic structures in CT images. Radiology: Artificial Intelligence, 5(5).)
  
 It was developed by Clément Brossard and Benjamin Lemasson (benjamin.lemasson@univ-grenoble-alpes.fr). 
 Brossard C, Grèze J, de Busschère JA, Attyé A, Richard M, Tornior FD, Acquitter C, Payen JF, Barbier EL, Bouzat P, Lemasson B. 
@@ -14,6 +15,7 @@ Prediction of therapeutic intensity level from automatic multiclass segmentation
 Sci Rep. 2023 Nov 17;13(1):20155. doi: 10.1038/s41598-023-46945-9. PMID: 37978266; PMCID: PMC10656472.
 
 If you use our software, please cite our work! 
+This software is not available for commercial purposes.
 
 To use this software :
 * 1/ Install docker : https://docs.docker.com/get-docker/
