@@ -6,9 +6,9 @@ with open("README.md", "r") as fh:
 setuptools.setup(
     name="CT_TIQUA",
     version="3.2",
-    author="Brossard Clement, Lemasson Benjamin",
+    author="Brossard Clement, Fehr Delude Theotime, Lemasson Benjamin",
     author_email="benjamin.lemasson@univ-grenoble-alpes.fr",
-    description="Computed Tomography traumatic brain Injury QUAntification",
+    description="Computed Tomography Traumatic brain Injury QUAntification",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/nifm-gin/CT-TIQUA",
@@ -21,6 +21,7 @@ setuptools.setup(
         ]
     },
     install_requires=[
+        'totalsegmentator'
         'scipy>=1.4.0',
         'monai',
         'numpy>=1.21',
@@ -34,5 +35,5 @@ setuptools.setup(
         'nipype',
         'boutiques',
     ],
-    python_requires='>=3.7',
+    python_requires='>=3.9',
 )

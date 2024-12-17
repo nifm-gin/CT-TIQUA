@@ -144,6 +144,9 @@ def compute_metrics(file_in, file_out):
     
     
 def Single_Volume_Inference(atlas, seg, Labels, outcsv):
+
+    
+
     Names_lesions=['No_lesion','IPH', 'SDH', 'EDH', 'IVH', 'SAH', 'Petechiae', 'Edema']
     with open(Labels, newline='') as f:
         reader = csv.reader(f)
@@ -157,7 +160,13 @@ def Single_Volume_Inference(atlas, seg, Labels, outcsv):
     # The problem is in the resampling of the registered raw data at 1mm3 and then should be fixed on that function, not here ...
     if seg_h.shape != atlas_h.shape:
         print("Error")
-        seg_h = nibabel.processing.conform(seg_h,atlas_h.shape, atlas_h.header.get("pixdim")[1:4], order = 0)
+        print("ATLAS SHAPE")
+        print(atlas_h.shape)
+        print("SEG SHAPE")
+        print(seg_h.shape)
+        print("PATH")
+        print(atlas)
+        seg_h = nibabel.processing.conform(from_img=seg_h,out_shape=atlas_h.shape, voxel_size=atlas_h.header.get("pixdim")[1:4], order = 0)
         
     seg = seg_h.get_fdata()
     atlas = atlas_h.get_fdata()
@@ -184,7 +193,8 @@ def Single_Volume_Inference(atlas, seg, Labels, outcsv):
             Line.append(nb_vox)
         
         Lines.append(Line)
-        
+
+
     with open(outcsv, 'w', newline='') as csvfile:
         wr = csv.writer(csvfile, quoting=csv.QUOTE_ALL)
         Just_label_names = [lab[1] for lab in Names_labels]
@@ -193,4 +203,118 @@ def Single_Volume_Inference(atlas, seg, Labels, outcsv):
         wr.writerow(['', 'Name_Lesion']+Just_label_names)
         for l in Lines:
             wr.writerow(l)
+
+
+   
+def combined_regions_lesion_nifti(atlas, seg, atlas_labels_csv, out_nifti_path):
+
+    seg_h = nib.load(seg)
+
+    #print("segmentation nifti header: ")
+
+    atlas_h = nib.load(atlas)
+        
+    # The following if statement is abad patch to assure that the atlas and segmentation have the same shape.
+    # The problem is in the resampling of the registered raw data at 1mm3 and then should be fixed on that function, not here ...
+    if seg_h.shape != atlas_h.shape:
+        #print("Error between seg and atlas shapes")
+
+        seg_h = nibabel.processing.conform(from_img=seg_h,out_shape=atlas_h.shape, voxel_size=atlas_h.header.get("pixdim")[1:4], order = 0)
+        
+    seg_data = seg_h.get_fdata()
+    atlas_data = atlas_h.get_fdata()
+
+    # Original atlas regions
+    atlas_labels = []
+    with open(atlas_labels_csv, newline='') as f:
+        reader = csv.reader(f)
+        atlas_labels = list(reader)
+    #print(atlas_labels)
+    lesion_names = ['No_lesion','IPH', 'SDH', 'EDH', 'IVH', 'SAH', 'Petechiae', 'Edema']
+
+    # Combined atlas regions (supraregions)
+    supratentorial = ["Right_frontal_cortex","Left_frontal_cortex","Right_temporal_cortex","Left_temporal_cortex","Right_insular_cortex","Left_insular_cortex",
+                  "Right_parietal_cortex","Left_parietal_cortex","Right_occipital_cortex","Left_occipital_cortex","Right_basal_ganglia","Left_central_ganglia",
+                  "Right_hypothalamus","Left_hypothalamus","Right_frontal_white_matter","Left_frontal_white_matter","Right_temporal_white_matter",
+                  "Left_temporal_white_matter","Right_occipital_white_matter","Left_occipital_white_matter","Right_parietal_white_matter","Left_parietal_white_matter",
+                  "Right_insular_white_matter","Left_insular_white_matter"]
+
+    brainstem = ["Brainstem"]
+
+    infratentorial = ["Right_cerebellum_lobe", "Left_cerebellum_lobe","Cerebellar_vermis"]
+
+    extracerebral = ["Right_posterior_inferior_extra_cerebral_space","Left_posterior_inferior_extra_cerebral_space","Right_anterior_inferior_extra_cerebral_space",
+                     "Left_anterior_inferior_extra_cerebral_space","Right_posterior_superior_extra_cerebral_space","Left_posterior_superior_extra_cerebral_space",
+                     "Right_Superior_Anterior_Extra_Brain_Space","Left_Superior_Anterior_Extra_Brain_Space", "Rest"]
+
+
+    final_nifti_labels = ['supratentorial_IPH', 'supratentorial_SAH', 'supratentorial_Petechiae', 'supratentorial_Edema',
+                           'infratentorial_IPH', 'infratentorial_SAH', 'infratentorial_Petechiae', 'infratentorial_Edema',
+                           'brainstem_IPH', 'brainstem_SAH', 'brainstem_Petechiae', 'brainstem_Edema', 
+                           'SDH', 'EDH']
     
+
+    new_combined_seg_nifti_data = np.zeros_like(seg_data)
+
+    #print(np.unique(seg_data))
+
+    for i in range(seg_data.shape[0]):
+        for j in range(seg_data.shape[1]):
+            for k in range(seg_data.shape[2]):
+
+                if int(seg_data[i,j,k]) != 0: #0 is when there is no lesion
+                    atlas_region_name = atlas_labels[int(atlas_data[i,j,k])][1]
+                    lesion_name = lesion_names[int(seg_data[i,j,k])]
+                    #print(f"{atlas_region_name}: {lesion_names[int(seg_data[i,j,k])]}")
+
+                    combined_region_name = "-"
+                    if atlas_region_name in supratentorial:
+                        combined_region_name = "supratentorial"
+                    elif atlas_region_name in brainstem:
+                        combined_region_name = "brainstem"
+                    elif atlas_region_name in infratentorial:
+                        combined_region_name = "infratentorial"
+                    elif atlas_region_name in extracerebral:
+                        combined_region_name = ""
+                    
+                    if lesion_name  in ['SDH', 'EDH']: # cas a part pour ces lesions car elles sont pas rattache a des regions
+                            final_nifti_label = lesion_name
+                            final_nifti_index = final_nifti_labels.index(final_nifti_label)
+                            new_combined_seg_nifti_data[i,j,k] = final_nifti_index
+                    elif combined_region_name != "-":
+                        
+
+                        if combined_region_name != "":
+                            final_nifti_label = combined_region_name+"_"+lesion_name
+                        else:
+                            final_nifti_label = lesion_name
+
+                        #print(final_nifti_label)
+                        if final_nifti_label in final_nifti_labels:
+                            
+                            final_nifti_index = final_nifti_labels.index(final_nifti_label)
+                        
+                            new_combined_seg_nifti_data[i,j,k] = final_nifti_index+1 #+1 because 0 corresponds to no label
+
+    new_combined_seg_nifti = nib.Nifti1Image(new_combined_seg_nifti_data, seg_h.affine, seg_h.header)
+    #print(np.unique(new_combined_seg_nifti_data))
+    nib.save(new_combined_seg_nifti, out_nifti_path)
+        
+
+
+def ventricle_volume_computation(seg_path, out_csv_path):
+
+    ventricle_seg = nib.load(seg_path)
+    ventricle_seg_data = ventricle_seg.get_fdata()
+
+    ventricle_volume = 0
+
+    for i in range(ventricle_seg_data.shape[0]):
+        for j in range(ventricle_seg_data.shape[1]):
+            for k in range(ventricle_seg_data.shape[2]):
+                    ventricle_volume += ventricle_seg_data[i,j,k]
+
+    with open(out_csv_path, 'w', newline='') as csvfile:
+        wr = csv.writer(csvfile, quoting=csv.QUOTE_ALL)
+        wr.writerow(["ventricles_volume"])
+        wr.writerow([ventricle_volume])
