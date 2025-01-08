@@ -10,8 +10,8 @@ import ants
 import torch
 from totalsegmentator.python_api import totalsegmentator
 
-from python_scripts.Volume_estimation import Single_Volume_Inference, ventricle_volume_computation
-from python_scripts.Script_Apply_DynUnet import ApplyDynUnet
+from .python_scripts.Volume_estimation import Single_Volume_Inference, ventricle_volume_computation
+from .python_scripts.Script_Apply_DynUnet import ApplyDynUnet
 
 
 

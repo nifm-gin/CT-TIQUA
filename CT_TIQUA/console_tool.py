@@ -9,7 +9,7 @@ Created on Fri Mar 18 15:52:21 2022
 import sys
 import os
 import argparse
-from main import inference
+from .main import inference
 
 def path(string):
     if os.path.exists(string):

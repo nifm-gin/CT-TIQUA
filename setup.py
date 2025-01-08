@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="CT_TIQUA",
-    version="3.2",
+    version="4.0",
     author="Brossard Clement, Fehr Delude Theotime, Lemasson Benjamin",
     author_email="benjamin.lemasson@univ-grenoble-alpes.fr",
     description="Computed Tomography Traumatic brain Injury QUAntification",
@@ -21,19 +21,20 @@ setuptools.setup(
         ]
     },
     install_requires=[
-        'totalsegmentator'
+        'acvl-utils==0.2.2',
+        'torch>=2.0.0',
+        'totalsegmentator',
         'scipy>=1.4.0',
         'monai',
         'numpy>=1.21',
         'pandas',
         'nibabel',
-        'torch',
-        'SimpleITK==1.2.4',
+        'SimpleITK>=1.2.4',
         'tensorboard',
         'pybids',
         'antspyx',
         'nipype',
         'boutiques',
     ],
-    python_requires='>=3.9',
+    python_requires='>=3.10',
 )
